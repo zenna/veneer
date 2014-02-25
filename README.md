@@ -1,5 +1,22 @@
 # A not so thin Veneer over C++
 
+# TODO
+- Construct a rewrite system to write clojure into ClangAST
+- Write C++ code to convert this data structure into ClangAST
+- Hack into ClangAST and get it to write it out as sourcecode
+
+Pure is an interesting language based on term rewriting;
+It seems more fully featured than I first anticipated.
+I can't really tell the extent to which it is functional vs functional features are implemented in terms of rewriting.
+The point is that we specify
+- a pattern
+- the variables to be bound if that pattern matches
+- a rewrite.
+
+Pure seems to provide a convenient syntax for doing this.
+
+
+
 Veneer is a programming language which transpiles to C++.
 
 # Why?
@@ -42,7 +59,6 @@ Cons: Already know Clojure, won't learn too much new.
 	  People will need JVM to use.
 
 Pros: Same language as IR, which means once veneer is working, bootstrapping will be almost instantaneous
-	  Even if rewrite stuff doesn't work, I'll have a general Clojure -> C++ compiler
 	  Already know pretty well.
 	  No need to parse text and worry about grammars
 
