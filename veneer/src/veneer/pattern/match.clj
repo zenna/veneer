@@ -138,7 +138,7 @@
   "Keep doing (f x), where x is initially init-value until 
   (pred (f x)) is satisfied, then return (f x).
    e.g. (repeat-until 3 inc (partial > 7)"
-  [init-value f pred?]
+  [f init-value pred?]
   (loop [value (f init-value)]
     (if (pred? value)
         value
@@ -158,10 +158,35 @@
     :step
     (fn [iterator]
       (let [zip-tree
-            (repeat-until (.zipped-tree iterator)
-                          zip/next
+            (repeat-until zip/next
+                          (.zipped-tree iterator)
                           #(or (zip/end? %) (zip/branch? %)))]
         (assoc iterator :zipped-tree zip-tree)))))
+
+;; Rule
+(defrecord Rule
+  ^{:doc "A rule is composed of a predicate, its two operands and conditions"}
+  [predicate lhs rhs condition])
+
+(defn rule
+  "Rule constructor
+   (rule '-> (~(lit 'square) ~(variable 'x)) ~'(* x x) ~'(pos? x)))"
+  [predicate lhs rhs condition]
+  (->Rule predicate lhs rhs condition))
+
+;; Binding
+; The rhs and condition of a rule will have variables which are bound
+; when patterns are matches on lhs.
+; Option 1: Make rhs and condition be functions which take arguments
+; Option 2: Leave them symbolic, do the syntactic replacement and then eval
+; I don't want to be calling eval at run-time so I should at least compile them
+; into functions ahread of time
+
+(rule '-> `(~(lit 'square) ~(variable 'x)) '(* x x) )
+(rule '-> `(~(lit '~*) ~(variable 'x) ~(variable 'y)) '~(* x x))
+
+((fn [x]
+  `(~'* ~x ~x)) 3)
 
 ;; Pattern Matching
 (def fail
@@ -281,28 +306,29 @@
            nil))
 
 ;; Transformers
-(defn pat-match-many
-  "Go through a list of rules
-   if any of them match, do the rewrite, else nil"
+(defn apply-first-transform
+  "Do the first transform that is applicable from an ordered set of rules
+   else nil"
   [exp rules]
   (loop-until (partial pat-rewrite exp) rules))
-  
+
 (defn eager-transformer
   "This is an eager transformer.
    It matches the rules in order and applies first match"
   [rules exp]
   (loop [iterator (subtree-iterator exp)]
-    (end? iterator) ; no rules matched
+    (end? iterator) ; recurse until no rules matched
     nil
 
-    (if-let [match (pat-match-many (realise iterator) rules)]
-      match
+    ; try first possible rewrite on this subtree, otherwise move to next
+    (if-let [exp (apply-first-transform (realise iterator) rules)]
+      exp
       (recur (step iterator)))))
 
 (defn rewrite
   "Rewrite an expression using a relation"
-  [exp relation]
-  (repeat-until exp relation nil?))
+  [exp transform]
+  (repeat-until transform exp nil?))
 
 ;; Parse DSL - more convenient notation for writing rules
 ; We create pure-lang like DSL for more concise rule writing
@@ -318,33 +344,30 @@
                  (subvec coll (inc index)))))))
 
 (comment
-  (def a)
-  (->Rule '(square x) '(* x x))
-  (defrule square "Square" x -> x * x)
-  (pat-match '(square ?x) '(+ (square 10) (square 20)))
 
-  (defrule primitive-f
-    "evaluate primitive functions"
-    f x1 .. xn -> (f x1 .. x2) where (and (function? f)
-                                          (primitive? f)
-                                          (evaluated? xi)))
+  ; (defrule primitive-f
+  ;   "evaluate primitive functions"
+  ;   f x1 .. xn -> (f x1 .. x2) where (and (function? f)
+  ;                                         (primitive? f)
+  ;                                         (evaluated? xi)))
 
-  (def a-rule `(~'-> (~(lit 'square) ~(variable 'x)) ~'(* x x) ~'(pos? x)))
+  ; (def a-rule '(-> (square x) (* x x) (and (pos? x))))
+  ; (def primitive-apply-rule
+  ;   '(-> (f x1 .. xn) ~(f x1 .. x2) (and (function? f)
+  ;                                        (primitive? f)
+  ;                                        (evaluated? xi))))
 
-  (def a-rule '(-> (square x) (* x x) (and (pos? x))))
-  (def primitive-apply-rule
-    '(-> (f x1 .. xn) ~(f x1 .. x2) (and (function? f)
-                                         (primitive? f)
-                                         (evaluated? xi))))
+  ; (def rand-rule
+  ;   '(-> (rand x y) (->interval-abo x y)))
 
-  (def rand-rule
-    '(-> (rand x y) (->interval-abo x y)))
+  ; (def convex-hull-rule
+  ;   '(⊑ (or x y) ~(convex-hull x y) (abo? x)))
 
-  (def convex-hull-rule
-    '(⊑ (or x y) ~(convex-hull x y) (abo? x)))
+  ; (def rules [a-rule primitive-apply-rule rand-rule convex-hull-rule])
 
-  (def rules [a-rule primitive-apply-rule rand-rule convex-hull-rule])
+  ;
   (def term '(+ 3 4 (rand 0 1) (rand 3 4)))
-
-  (def transformer (partial eager-transformer rules))
-  (def evaluated-term (rewrite term eager-transformer)))
+  (def a-rule `(~'-> (~(lit 'square) ~(variable 'x)) ~'(* x x) ~'(pos? x)))
+  (def transformer (partial eager-transformer [a-rule]))
+  
+  ; (def evaluated-term (rewrite term eager-transformer)))
