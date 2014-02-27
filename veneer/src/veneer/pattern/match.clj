@@ -188,17 +188,13 @@
   "Does variable match input?"
   [var input bindings]
   (let [binding-val (get-binding var bindings)]
-    (cond 
+    (println "getting here" var input bindings)
+    (cond
       (nil? binding-val) (extend-bindings var input bindings)
       
       (= input binding-val) bindings
       
       :else fail)))
-
-(defn variable?
-  "is x a variable (a symbol starting with ?"
-  [x]
-  (and (symbol? x) (.startsWith (name x) "?")))
 
 ; (defn segment-pattern?
 ;   "is this a segment matching pattern?"
@@ -207,35 +203,82 @@
 ;        (.startsWith (name (first pattern)) "?*")))
 
 ; TODO
+
+
+(defn lit
+  "make a literal"
+  [symbol]
+  ['lit symbol])
+
+(defn lit?
+  "is it a literal"
+  [x]
+  (and (vector? x)
+       (= (first x) 'lit)))
+
+(defn variable
+  "make a variablel"
+  [symbol]
+  ['variable symbol])
+
+(defn variable?
+  "is it a literal"
+  [x]
+  (and (vector? x)
+       (= (first x) 'variable)))
+
+(defn no-var-node-iterator
+  "Node iterator factory"
+  [exp]
+  (NodeIterator. exp (zip/zipper #(and (not (variable? %)) (coll? %))
+                      seq (fn [_ c] c) exp)))
+
+(defn pat-match
+  "Match pattern against input and bind variables to values.
+   Iterate through both simultaneously, when I find a variable in pattern,
+   bind that to whatever is at the same spot in exp.
+
+   For a pattern to match, all its variables must match presumably.
+  e.g. Pattern = ([lit square] [variable x])
+       Input   = (* x x)
+       What about 
+       (f x? (y? z)) (f hello d)
+  "
+  [pattern exp]
+  (loop [pattern-itr (no-var-node-iterator pattern)
+         exp-itr (no-var-node-iterator exp)
+         bindings {}]
+    (println "pattern is" (realise pattern-itr) "exp" (realise exp-itr)
+              "bindings" bindings)
+    (cond
+      (= bindings fail)
+      fail
+
+      (and (end? pattern-itr) (end? exp-itr))
+      bindings
+
+      ;Equal so no binding but continue
+      (= (realise pattern-itr) (realise exp-itr)) 
+      (recur (step pattern-itr) (step exp-itr) bindings)
+
+      (variable? (realise pattern-itr))
+      (recur (step pattern-itr) (step exp-itr)
+             (match-variable (realise pattern-itr) (realise exp-itr) bindings))
+
+      (and (list? (realise pattern-itr))
+           (list? (realise exp-itr)))
+      (recur (step pattern-itr) (step exp-itr) bindings)
+
+      :else ; literal in both do not match
+      fail)))
+
 (defn pat-rewrite
   "Determine whether a pattern matches, if so, rewrite accordingly.
    Else return nil"
   [exp rule]
-  nil)
-
-(defn pat-match
-  "Match pattern against input in the context of the binding"
-  ([pattern input] (pat-match pattern input no-bindings))
-  ([pattern input bindings]
-  (println "pattern matching" pattern "-" input)
-  (cond
-    (= bindings fail) fail
-    
-    (variable? pattern)
-    (match-variable pattern input bindings)
-
-    (= pattern input)
-    bindings
-
-    ; (segment-pattern? pattern)
-    ; (segment-match pattern input bindings)
-
-    (and (list? pattern) (list? input))
-    (pat-match (rest pattern) (rest input)
-               (pat-match (first pattern) (first input)
-                           bindings))
-    :else
-    fail)))
+  (if-let [bindings (pat-match (pattern rule) exp)]
+           (bind-bindings-to-rewrite)
+           nil))
 
 ;; Transformers
 (defn pat-match-many
@@ -275,6 +318,7 @@
                  (subvec coll (inc index)))))))
 
 (comment
+  (def a)
   (->Rule '(square x) '(* x x))
   (defrule square "Square" x -> x * x)
   (pat-match '(square ?x) '(+ (square 10) (square 20)))
@@ -284,6 +328,8 @@
     f x1 .. xn -> (f x1 .. x2) where (and (function? f)
                                           (primitive? f)
                                           (evaluated? xi)))
+
+  (def a-rule `(~'-> (~(lit 'square) ~(variable 'x)) ~'(* x x) ~'(pos? x)))
 
   (def a-rule '(-> (square x) (* x x) (and (pos? x))))
   (def primitive-apply-rule
