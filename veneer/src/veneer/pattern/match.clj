@@ -1,6 +1,7 @@
 (ns ^{:doc "Do some Pattern matching"
       :author "Zenna Tavares"}
   veneer.pattern.match
+  (:require [clozen.debug :as clzn])
   (:require [clojure.zip :as zip]))
 
 ; There are two parts to this system.
@@ -89,6 +90,8 @@
    get the actual value"
   (step [iterator])
   (end? [iterator])
+  (update [iterator node])
+  (root [iterator])
   (realise [iterator]))
 
 (defrecord NodeIterator
@@ -125,9 +128,17 @@
    (fn [iterator]
      (zip/end? (.zipped-tree iterator)))
 
-    :realise
-    (fn [iterator]
-      (first (.zipped-tree iterator)))})
+   :update
+   (fn [iterator node]
+     (assoc iterator :zipped-tree (zip/replace (.zipped-tree iterator) node)))
+
+   :root
+   (fn [iterator]
+     (zip/root (.zipped-tree iterator)))
+
+   :realise
+   (fn [iterator]
+     (first (.zipped-tree iterator)))})
 
 ; Node iterator is the same as the abstract iterator
 (extend NodeIterator
@@ -144,12 +155,28 @@
         value
         (recur (f value)))))
 
-(defn loop-until
+(defn repeat-before-until
+  "Keep doing (f x), where x is initially init-value until 
+  (pred (f x)) is satisfied, then return x.
+   e.g. (repeat-until 3 inc (partial > 7)"
+  [f init-value pred?]
+  (loop [value init-value]
+    (let [f-value (f value)]
+      (if (pred? f-value)
+          value
+          (recur f-value)))))
+
+(defn loop-until-fn
   "Loop through coll until (f elem) is not nil.
    then return (f elem).
    If no matches for any then return nil"
   [f coll]
-  (some #(if (f %) %) coll))
+  (loop [coll coll]
+    (if (seq coll)
+        (if-let [x (f (first coll))]
+          x
+          (recur (next coll)))
+      nil)))
 
 (extend SubtreeIterator
   Iterator
@@ -162,31 +189,6 @@
                           (.zipped-tree iterator)
                           #(or (zip/end? %) (zip/branch? %)))]
         (assoc iterator :zipped-tree zip-tree)))))
-
-;; Rule
-(defrecord Rule
-  ^{:doc "A rule is composed of a predicate, its two operands and conditions"}
-  [predicate lhs rhs condition])
-
-(defn rule
-  "Rule constructor
-   (rule '-> (~(lit 'square) ~(variable 'x)) ~'(* x x) ~'(pos? x)))"
-  [predicate lhs rhs condition]
-  (->Rule predicate lhs rhs condition))
-
-;; Binding
-; The rhs and condition of a rule will have variables which are bound
-; when patterns are matches on lhs.
-; Option 1: Make rhs and condition be functions which take arguments
-; Option 2: Leave them symbolic, do the syntactic replacement and then eval
-; I don't want to be calling eval at run-time so I should at least compile them
-; into functions ahread of time
-
-(rule '-> `(~(lit 'square) ~(variable 'x)) '(* x x) )
-(rule '-> `(~(lit '~*) ~(variable 'x) ~(variable 'y)) '~(* x x))
-
-((fn [x]
-  `(~'* ~x ~x)) 3)
 
 ;; Pattern Matching
 (def fail
@@ -213,7 +215,7 @@
   "Does variable match input?"
   [var input bindings]
   (let [binding-val (get-binding var bindings)]
-    (println "getting here" var input bindings)
+    (println "Match Variable" var input bindings)
     (cond
       (nil? binding-val) (extend-bindings var input bindings)
       
@@ -258,6 +260,7 @@
   (NodeIterator. exp (zip/zipper #(and (not (variable? %)) (coll? %))
                       seq (fn [_ c] c) exp)))
 
+
 (defn pat-match
   "Match pattern against input and bind variables to values.
    Iterate through both simultaneously, when I find a variable in pattern,
@@ -273,62 +276,95 @@
   (loop [pattern-itr (no-var-node-iterator pattern)
          exp-itr (no-var-node-iterator exp)
          bindings {}]
-    (println "pattern is" (realise pattern-itr) "exp" (realise exp-itr)
-              "bindings" bindings)
+    (println "Pattern is:" (realise pattern-itr) " ,Exp:" (realise exp-itr)
+              ", Bindings:" bindings)
     (cond
-      (= bindings fail)
-      fail
+      (= bindings fail) ; Possibly due to variable matching two different vals
+      fail              ; As determined by match-variable in previous iter
 
+      ;; The only time we succeed is if we reach the end of the pattern & exp
+      ;; and all variables are matched, and seen no conflicts along the way
       (and (end? pattern-itr) (end? exp-itr))
       bindings
+
+      (or (end? pattern-itr) (end? exp-itr)) ; Reached end and not all matched
+      fail
 
       ;Equal so no binding but continue
       (= (realise pattern-itr) (realise exp-itr)) 
       (recur (step pattern-itr) (step exp-itr) bindings)
 
+      ;; If the matching is successful and the matched item is a list, we can
+      ;; skip over that by 
       (variable? (realise pattern-itr))
-      (recur (step pattern-itr) (step exp-itr)
-             (match-variable (realise pattern-itr) (realise exp-itr) bindings))
+      (let [new-b (match-variable (realise pattern-itr)
+                                  (realise exp-itr) bindings)]
+        (recur (step pattern-itr)
+               (step (if (not= new-b fail) (update exp-itr 'X) exp-itr))
+               new-b))
 
-      (and (list? (realise pattern-itr))
-           (list? (realise exp-itr)))
+      (and (seq? (realise pattern-itr))
+           (seq? (realise exp-itr)))
       (recur (step pattern-itr) (step exp-itr) bindings)
 
       :else ; literal in both do not match
       fail)))
 
+; ;; Need to distinguish between being at the end of the pattern and everything having matched
+; ;; Vs being at end and not everything having matched
+
+; (square ?x) (square (square 3))
+
+; (f ?x ?y) (f 3 4) ; is it possible to reach end of both without all of pattern having
+
+;; Rule
+(defrecord Rule
+  ^{:doc "A rule is composed of a predicate, its two operands and conditions"}
+  [predicate lhs rhs condition])
+
+(defn rule
+  "Rule constructor
+   (rule '-> (~(lit 'square) ~(variable 'x)) ~'(* x x) ~'(pos? x)))"
+  [predicate lhs rhs condition]
+  (->Rule predicate lhs rhs condition))
+
 (defn pat-rewrite
   "Determine whether a pattern matches, if so, rewrite accordingly.
    Else return nil"
   [exp rule]
-  (if-let [bindings (pat-match (pattern rule) exp)]
-           (bind-bindings-to-rewrite)
-           nil))
+  (println "Doing Pattern Rewrite")
+  (if-let [bindings (clzn/dbg (pat-match (:lhs rule) exp))]
+    (if ((:condition rule) bindings) ;if we match and conditions pass
+        ((:rhs rule) bindings)
+        nil)
+    nil))
 
 ;; Transformers
 (defn apply-first-transform
   "Do the first transform that is applicable from an ordered set of rules
    else nil"
   [exp rules]
-  (loop-until (partial pat-rewrite exp) rules))
+  (loop-until-fn (partial pat-rewrite exp) rules))
 
 (defn eager-transformer
   "This is an eager transformer.
    It matches the rules in order and applies first match"
   [rules exp]
+  (println "getting in eager transformer")
   (loop [iterator (subtree-iterator exp)]
-    (end? iterator) ; recurse until no rules matched
-    nil
-
-    ; try first possible rewrite on this subtree, otherwise move to next
-    (if-let [exp (apply-first-transform (realise iterator) rules)]
-      exp
-      (recur (step iterator)))))
+    (if (end? iterator) ; recurse until no rules matched
+        nil
+        ; try first possible rewrite on this subtree, otherwise move to next
+        (if-let [exp (apply-first-transform (realise iterator) rules)]
+          ; Rewrite part of expression iterator currently pointing to,
+          ; then returh entire root
+          (root (update iterator exp)) 
+          (recur (step iterator))))))
 
 (defn rewrite
   "Rewrite an expression using a relation"
   [exp transform]
-  (repeat-until transform exp nil?))
+  (repeat-before-until transform exp nil?))
 
 ;; Parse DSL - more convenient notation for writing rules
 ; We create pure-lang like DSL for more concise rule writing
@@ -344,6 +380,27 @@
                  (subvec coll (inc index)))))))
 
 (comment
+  (def a-rule
+    (rule '->
+          `(~'square ~(variable 'x)) ; lhs
+          (fn [{x (variable 'x)}]           ; rhs
+            `(~'* ~x ~x))
+          (fn [_]           ; condition
+            true)))
+  (def mul-rule
+    (rule '->
+          `(~'* ~(variable 'x) ~(variable 'y)) ; lhs
+          (fn [{x (variable 'x) y (variable 'y)}]           ; rhs
+            (* x y))
+          (fn [{x (variable 'x) y (variable 'y)}]           ; condition
+            (and (number? x) (number? y)))))
+  (def a-exp '(square (square 3)))
+  (def b-exp '(* 2 9))
+  (def transformer (partial eager-transformer [a-rule mul-rule]))
+  (rewrite a-exp transformer)
+  (def result (rewrite a-exp transformer))
+
+
 
   ; (defrule primitive-f
   ;   "evaluate primitive functions"
@@ -365,9 +422,16 @@
 
   ; (def rules [a-rule primitive-apply-rule rand-rule convex-hull-rule])
 
-  ;
-  (def term '(+ 3 4 (rand 0 1) (rand 3 4)))
-  (def a-rule `(~'-> (~(lit 'square) ~(variable 'x)) ~'(* x x) ~'(pos? x)))
-  (def transformer (partial eager-transformer [a-rule]))
+  
+  ;; Binding
+  ; The rhs and condition of a rule will have variables which are bound
+  ; when patterns are matches on lhs.
+  ; Option 1: Make rhs and condition be functions which take arguments
+  ; Option 2: Leave them symbolic, do the syntactic replacement and then eval
+  ; I don't want to be calling eval at run-time so I should at least compile them
+  ; into functions ahread of time
+
+
+  ; )
   
   ; (def evaluated-term (rewrite term eager-transformer)))
