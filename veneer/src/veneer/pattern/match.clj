@@ -1,7 +1,10 @@
 (ns ^{:doc "Do some Pattern matching"
       :author "Zenna Tavares"}
   veneer.pattern.match
-  (:require [clozen.debug :as clzn])
+  (:require [clozen.debug :as debug]
+            [clozen.helpers :as clzn]
+            [clozen.iterator :refer :all])
+  (:import [clozen.iterator NodeIterator SubtreeIterator])
   (:require [clojure.zip :as zip]))
 
 ; There are two parts to this system.
@@ -75,120 +78,50 @@
 ; - A DSL which makes it convenient to write these rewrite rules
 ; We can use macros to define a pure like language for rewriting.
 
-;; Iterators
-(defprotocol Iterator
-  "This iterator is a purely functional version of an iterator ala C++
-   The purpose is to abstract away the mechanics of iteration for better
-   modularity.
-   Suppose you have a pattern matching algorithm and you want to parameterise
-   whether you are matching against every single node or just subgraphs.
-   Iteration is done with (step iterator) which returns a new iterator,
-   with some kind of pointer (this is a protocol so implementation details) to
-   the next location.
-   Since the iterator contains lots more information than you may want for
-   any particular algorithm that uses it, we must use the realise function to
-   get the actual value"
-  (step [iterator])
-  (end? [iterator])
-  (update [iterator node])
-  (root [iterator])
-  (realise [iterator]))
+;; TODO
+; Features
+; DSL, need more convenient notation. Some combination of function and macros
+; take spec e.g
+;     f x1 .. xn -> (f x1 .. x2) where (and (function? f)
+;                                           (primitive? f)
+;                                           (evaluated? xi)))
 
-(defrecord NodeIterator
-  ^{:doc
-    "Iterates through all nodes of an expression depth-first.
-     e.g. (+ 3 4 (rand 0 1) (rand 3 4)) ->
-          (+ 3 4 (rand 0 1) (rand 3 4)), +, 3, (rand 0 1), rand, 0, .."}
-  [tree zipped-tree])
+; recognise f is the literal, xns are variables, make rewrite function with variables bound, and condition with variables bound.
+; Encode all evaluation rules as rewrite rules
+;  
 
-(defrecord SubtreeIterator
-  ^{:doc
-    "Iterates through all subtrees of an expression depth-first.
-    e.g. (+ 3 4 (rand 0 1) (rand 3 4)) ->
-         (+ 3 4 (rand 0 1) (rand 3 4)), (rand 0 1), (rand 3 4)"}
-  [tree zipped-tree])
+; Code smell
+; Repeat until / repeat before until need better names
+; I have this lit? code, its not being used, decide what is correct to do there
+; no-var-node-iterator seems a bit ad hoc, what is the general problem and solution
+; is this X'ing out of matched patterns the right thing to do?
+; Do i have the write logic in my pattern matcher
+; is seq? the right predicate for when to go inside
+; Can I add types to my rules?
 
-(defn node-iterator
-  "Node iterator factory"
-  [exp]
-  (NodeIterator. exp (zip/zipper coll? seq (fn [_ c] c) exp)))
+; The evaluation of the program is a kind of problem, but what kind?
 
-(defn subtree-iterator
-  "Subtree iterator factory"
-  [exp]
-  (SubtreeIterator. exp (zip/zipper coll? seq (fn [_ c] c) exp)))
+; At a high level when we evaluate a program approximately, we have to make choices about which approximatiosn we take.
+; The choices we make may have consequences in the future, and we may have to revise our choices.
+; This motivations two perspectives on the kind of problem this is, a) a planning problem b) a graph search problem c) an local optimisation.
 
-(def abstract-zip-iterator-impl
-  "Abstract implementation for iterators built upon clojure/zip"
-  {:step
-    (fn [iterator]
-      (assoc iterator :zipped-tree (zip/next (.zipped-tree iterator))))
+; The main properties of the problem are this
+; - The interpreter is given a valid lisp program p.
+; - In order to evaluate this program the interpreter has a set of transformations it can apply to the program.
+; - some of these transformations may may be parameterised, and hence in order to be applied the interpreter much assign appropriate parameter values
+; - there is no normal form, hence no single goal state. Many states are goals, all of which must app
+; - For some transformations there is no important choice to make, since the transformation is not an approximating transformation.
+; - varying transformations may take varying amounts of resources
+; - they may also result in better or worse approximatiosn
+; - the quality or cost of every state should be some function of the fidelity of the approximatinon
+; - its not clear whehter its meaningful to assign costs to non-goal states
+; - what is a goal state anyway?
 
-   :end?
-   (fn [iterator]
-     (zip/end? (.zipped-tree iterator)))
-
-   :update
-   (fn [iterator node]
-     (assoc iterator :zipped-tree (zip/replace (.zipped-tree iterator) node)))
-
-   :root
-   (fn [iterator]
-     (zip/root (.zipped-tree iterator)))
-
-   :realise
-   (fn [iterator]
-     (first (.zipped-tree iterator)))})
-
-; Node iterator is the same as the abstract iterator
-(extend NodeIterator
-  Iterator
-  abstract-zip-iterator-impl)
-
-(defn repeat-until
-  "Keep doing (f x), where x is initially init-value until 
-  (pred (f x)) is satisfied, then return (f x).
-   e.g. (repeat-until 3 inc (partial > 7)"
-  [f init-value pred?]
-  (loop [value (f init-value)]
-    (if (pred? value)
-        value
-        (recur (f value)))))
-
-(defn repeat-before-until
-  "Keep doing (f x), where x is initially init-value until 
-  (pred (f x)) is satisfied, then return x.
-   e.g. (repeat-until 3 inc (partial > 7)"
-  [f init-value pred?]
-  (loop [value init-value]
-    (let [f-value (f value)]
-      (if (pred? f-value)
-          value
-          (recur f-value)))))
-
-(defn loop-until-fn
-  "Loop through coll until (f elem) is not nil.
-   then return (f elem).
-   If no matches for any then return nil"
-  [f coll]
-  (loop [coll coll]
-    (if (seq coll)
-        (if-let [x (f (first coll))]
-          x
-          (recur (next coll)))
-      nil)))
-
-(extend SubtreeIterator
-  Iterator
-  (assoc abstract-zip-iterator-impl
-    ; Keep doing zip/next until I get to a branch
-    :step
-    (fn [iterator]
-      (let [zip-tree
-            (repeat-until zip/next
-                          (.zipped-tree iterator)
-                          #(or (zip/end? %) (zip/branch? %)))]
-        (assoc iterator :zipped-tree zip-tree)))))
+;; TODO
+; Make this work on the mean and planning example
+; Devise and code inverse graphics example
+; Refacator out iterator and graph to clozen or elsewhere - DONE
+; 
 
 ;; Pattern Matching
 (def fail
@@ -215,22 +148,13 @@
   "Does variable match input?"
   [var input bindings]
   (let [binding-val (get-binding var bindings)]
-    (println "Match Variable" var input bindings)
+    ; (println "Match Variable" var input bindings)
     (cond
       (nil? binding-val) (extend-bindings var input bindings)
       
       (= input binding-val) bindings
       
       :else fail)))
-
-; (defn segment-pattern?
-;   "is this a segment matching pattern?"
-;   [pattern]
-;   (and (list? pattern)
-;        (.startsWith (name (first pattern)) "?*")))
-
-; TODO
-
 
 (defn lit
   "make a literal"
@@ -244,7 +168,7 @@
        (= (first x) 'lit)))
 
 (defn variable
-  "make a variablel"
+  "make a variable"
   [symbol]
   ['variable symbol])
 
@@ -259,7 +183,6 @@
   [exp]
   (NodeIterator. exp (zip/zipper #(and (not (variable? %)) (coll? %))
                       seq (fn [_ c] c) exp)))
-
 
 (defn pat-match
   "Match pattern against input and bind variables to values.
@@ -276,8 +199,8 @@
   (loop [pattern-itr (no-var-node-iterator pattern)
          exp-itr (no-var-node-iterator exp)
          bindings {}]
-    (println "Pattern is:" (realise pattern-itr) " ,Exp:" (realise exp-itr)
-              ", Bindings:" bindings)
+    ; (println "Pattern is:" (realise pattern-itr) " ,Exp:" (realise exp-itr)
+    ;           ", Bindings:" bindings)
     (cond
       (= bindings fail) ; Possibly due to variable matching two different vals
       fail              ; As determined by match-variable in previous iter
@@ -310,13 +233,6 @@
       :else ; literal in both do not match
       fail)))
 
-; ;; Need to distinguish between being at the end of the pattern and everything having matched
-; ;; Vs being at end and not everything having matched
-
-; (square ?x) (square (square 3))
-
-; (f ?x ?y) (f 3 4) ; is it possible to reach end of both without all of pattern having
-
 ;; Rule
 (defrecord Rule
   ^{:doc "A rule is composed of a predicate, its two operands and conditions"}
@@ -332,8 +248,7 @@
   "Determine whether a pattern matches, if so, rewrite accordingly.
    Else return nil"
   [exp rule]
-  (println "Doing Pattern Rewrite")
-  (if-let [bindings (clzn/dbg (pat-match (:lhs rule) exp))]
+  (if-let [bindings (pat-match (:lhs rule) exp)]
     (if ((:condition rule) bindings) ;if we match and conditions pass
         ((:rhs rule) bindings)
         nil)
@@ -344,13 +259,13 @@
   "Do the first transform that is applicable from an ordered set of rules
    else nil"
   [exp rules]
-  (loop-until-fn (partial pat-rewrite exp) rules))
+  (clzn/loop-until-fn (partial pat-rewrite exp) rules))
 
 (defn eager-transformer
   "This is an eager transformer.
    It matches the rules in order and applies first match"
   [rules exp]
-  (println "getting in eager transformer")
+  ; (println "getting in eager transformer")
   (loop [iterator (subtree-iterator exp)]
     (if (end? iterator) ; recurse until no rules matched
         nil
@@ -364,7 +279,7 @@
 (defn rewrite
   "Rewrite an expression using a relation"
   [exp transform]
-  (repeat-before-until transform exp nil?))
+  (clzn/repeat-before-until #(debug/dbg (transform %)) exp nil?))
 
 ;; Parse DSL - more convenient notation for writing rules
 ; We create pure-lang like DSL for more concise rule writing
@@ -379,6 +294,29 @@
           (recur (conj split-colls (subvec coll 0 index)) 
                  (subvec coll (inc index)))))))
 
+(def primitives {'+ + '* * '- +})
+
+(defn primitive
+  "Get evaluable function from symbol"
+  [symb]
+  (if-let [f (primitives symb)]
+    f
+    (eval symb)))
+
+(defn primitive?
+  "Is the symbol a primitive?"
+  [symb]
+  (clzn/nil-to-false (primitives symb)))
+
+(defn evaluated?
+  "Is this expression fully evaluated? Check by seeing if any more
+   rewrite rules can be applied"
+  [exp]
+  (number? exp)) ; FIXME this is wrong
+  ; (if (clzn/loop-until-fn #(pat-match (:lhs %) exp) rules)
+  ;   true
+  ;   false))
+
 (comment
   (def a-rule
     (rule '->
@@ -387,6 +325,7 @@
             `(~'* ~x ~x))
           (fn [_]           ; condition
             true)))
+
   (def mul-rule
     (rule '->
           `(~'* ~(variable 'x) ~(variable 'y)) ; lhs
@@ -394,44 +333,21 @@
             (* x y))
           (fn [{x (variable 'x) y (variable 'y)}]           ; condition
             (and (number? x) (number? y)))))
-  (def a-exp '(square (square 3)))
+
+  ;; The problem here is that I want to tell if there are any more transforms
+  ;; To do, so the condition is dependent on what I have evaluated already
+  (def primitive-apply-rule
+    (rule '->
+          `(~(variable 'f) ~(variable 'x) ~(variable 'y))
+          (fn [{f (variable 'f) x (variable 'x) y (variable 'y)}]
+            ((primitive f) x y))
+          (fn [{f (variable 'f) x (variable 'x) y (variable 'y)}]
+            (and (primitive? f)
+                 (evaluated? x)
+                 (evaluated? y)))))
+
+  (def a-exp '(+ (square (square 3)) 2))
   (def b-exp '(* 2 9))
-  (def transformer (partial eager-transformer [a-rule mul-rule]))
+  (def transformer (partial eager-transformer [a-rule primitive-apply-rule]))
   (rewrite a-exp transformer)
-  (def result (rewrite a-exp transformer))
-
-
-
-  ; (defrule primitive-f
-  ;   "evaluate primitive functions"
-  ;   f x1 .. xn -> (f x1 .. x2) where (and (function? f)
-  ;                                         (primitive? f)
-  ;                                         (evaluated? xi)))
-
-  ; (def a-rule '(-> (square x) (* x x) (and (pos? x))))
-  ; (def primitive-apply-rule
-  ;   '(-> (f x1 .. xn) ~(f x1 .. x2) (and (function? f)
-  ;                                        (primitive? f)
-  ;                                        (evaluated? xi))))
-
-  ; (def rand-rule
-  ;   '(-> (rand x y) (->interval-abo x y)))
-
-  ; (def convex-hull-rule
-  ;   '(⊑ (or x y) ~(convex-hull x y) (abo? x)))
-
-  ; (def rules [a-rule primitive-apply-rule rand-rule convex-hull-rule])
-
-  
-  ;; Binding
-  ; The rhs and condition of a rule will have variables which are bound
-  ; when patterns are matches on lhs.
-  ; Option 1: Make rhs and condition be functions which take arguments
-  ; Option 2: Leave them symbolic, do the syntactic replacement and then eval
-  ; I don't want to be calling eval at run-time so I should at least compile them
-  ; into functions ahread of time
-
-
-  ; )
-  
-  ; (def evaluated-term (rewrite term eager-transformer)))
+  (def result (rewrite a-exp transformer)))
