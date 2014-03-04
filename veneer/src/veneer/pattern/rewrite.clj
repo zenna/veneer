@@ -1,6 +1,11 @@
 (ns ^{:doc "Rewriting"
       :author "Zenna Tavares"}
-  veneer.pattern.rewrite)
+  veneer.pattern.rewrite
+  (:require [clozen.debug :as debug]
+            [clozen.helpers :as clzn]
+            [clozen.iterator :refer :all])
+  (:import [clozen.iterator NodeIterator SubtreeIterator])
+  (:require [veneer.pattern.match :refer :all]))
 
 ;; It's a bit confusing about how these ideas fit together
 ;; On the one hand we have a pattern matching library that seems to have
@@ -25,10 +30,6 @@
 ; A sound transformer shall then have to recognise that it can replace any term with its approximation.
 ; An unsound transformer might even do the opposite.
 ; There may be no normal form, instead there may be a variety of normal forms.
-
-; Code smell
-
-
 (defrecord Rule
   ^{:doc "A rule is composed of a predicate, its two operands and conditions"}
   [predicate lhs rhs condition])
@@ -36,13 +37,14 @@
 (defn rule
   "Rule constructor
    (rule '-> (~(lit 'square) ~(variable 'x)) ~'(* x x) ~'(pos? x)))"
-  [predicate lhs rhs condition]
-  (->Rule predicate lhs rhs condition))
+  ([predicate lhs rhs condition] (->Rule predicate lhs rhs condition))
+  ([predicate lhs rhs] (->Rule predicate lhs rhs (fn [& _] true))))
 
 (defn pat-rewrite
   "Determine whether a pattern matches, if so, rewrite accordingly.
    Else return nil"
   [exp rule]
+  (println "lhs is" (:lhs rule) "exp is" exp)
   (if-let [bindings (pat-match (:lhs rule) exp)]
     (if ((:condition rule) bindings) ;if we match and conditions pass
         ((:rhs rule) bindings)
@@ -60,7 +62,6 @@
   "This is an eager transformer.
    It matches the rules in order and applies first match"
   [rules exp]
-  ; (println "getting in eager transformer")
   (loop [iterator (subtree-iterator exp)]
     (if (end? iterator) ; recurse until no rules matched
         nil
