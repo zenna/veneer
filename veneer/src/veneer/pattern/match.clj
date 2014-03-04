@@ -4,112 +4,25 @@
   (:require [clozen.debug :as debug]
             [clozen.helpers :as clzn]
             [clozen.iterator :refer :all])
+  (:require [clojure.core.match :refer [clj-form match]])
   (:import [clozen.iterator NodeIterator SubtreeIterator])
   (:require [clojure.zip :as zip]))
 
-; There are two parts to this system.
-; The first is a set of sentences, for instance (+ x y) = (+ y x), (square x) -> (* x x), x ⊑ (convex-hull x).
-; The latter is a transformer (equally an interpeter, evaluator or rewriter)
-; The combination of the relations together with the transformer define a graph.
-; Each node of this graph is a term and nodes are connected by the transformers interpretation of the relations.
-
-; The evaluation of purely functional lisp programs can be thought of as a special case.
-; There each term is a tree, rules could be of the form
-; (f x y) -> ~(f x y).
-; Typical transformers interpret the arrow as a rewrite, and typically operate
-; in a strictly ordered fashion in order to reduce an expression to its normal form.
-
-; In approximate or abstract interpretation, as well as other domains there are other criteria.
-; We may represent abstraction rules as, for example, abstraction relations, e.g. (or x y z) ⊑ (convex-hull x y z).
-; A sound transformer shall then have to recognise that it can replace any term with its approximation.
-; An unsound transformer might even do the opposite.
-; There may be no normal form, instead there may be a variety of normal forms.
-; There are two ideas that need to be modelled - there are goal and non goal states in that sense that we hope to fully evaluate the program, and 2) among all states (including the goals), there is variable associated cost.
-; This may be a measure of how much memory is in use, how many abstract objects,
-; how accurate the approximation is etc.
-
-; It may be desirable for some interpreters to be able to back track.
-; Among the multiple ways of doing this, one that seems most elegant and compatible with an MDP prespective on evaluation is to modify all existing rewrite rules.
-; These rewrite would say, whenever I transform an object, I shall store its history with it, i.e. what it was before.
-; I then have a general rule which matches any object with a history and can revert it.
-
-; ; - Abstract interpretation choices
-; ; We can represent choices to be made in abstract interpretation as rewrite rules
-; ; e.g. x ⊑ (convex-hull x) when ()
-
-; ; This has implications for the rewriting.
-; ; If the rewriter is sound it should only perform rewrites which approximate.
-
-
-; ; - History: Rewrites vs Equations
-; ; When evaluating a program, in particular when we have to make several choices
-; ; regarding which abstractions to use and to what precision, there may be
-; ; times where we want to undo.
-; ; We may wish to revert our decisions and make better ones in light of new evidence.
-; ; Rewriting a program is inherently destructive, information is lost along the
-; ; way.  In order to be able to backtrack there seem to be two viable alternatives.
-; ; 1. The agent stores his history, and other information as he sees fit.
-; ; 2. We do not do rewriting in the stricted sense of the term, instead
-; ; the program is one point in a discrete state space, adjoined by transitions
-; ; made possible through rewrites.
-
-; - Precedence and Decision Making
-; Precedence is important in rewrite systems due to conflicts.
-; There are at least two types of conflict.
-; Both of these occur when an expression is mathed by more than one pattern (pattern + rewrite).
-; This could be the same pattern matching multiple times in a single expression:
-
-; square x -> x * x;
-; => (square (square x))
-
-; or different patterns matching the expression
-; double x -> x + x
-; (double (square x))
-
-; The previous two examples were not desctuctive, in the sense that
-; performing either of the rewrites did not invalidate the other pattern, and
-; hence the order of rewrites has no effect on the fina result.
-; There are destructive conflicts however:
-; (f (/ x 0) _) -> undefined
-; => (square (/ 5 0))
-
-; Rewrite systems typically do not have much machinery in the way of ordering.
-
-; - A DSL which makes it convenient to write these rewrite rules
-; We can use macros to define a pure like language for rewriting.
-
-; At a high level when we evaluate a program approximately, we have to make choices about which approximatiosn we take.
-; The choices we make may have consequences in the future, and we may have to revise our choices.
-; This motivations two perspectives on the kind of problem this is, a) a planning problem b) a graph search problem c) an local optimisation.
-
-; The main properties of the problem are this
-; - The interpreter is given a valid lisp program p.
-; - In order to evaluate this program the interpreter has a set of transformations it can apply to the program.
-; - some of these transformations may may be parameterised, and hence in order to be applied the interpreter much assign appropriate parameter values
-; - there is no normal form, hence no single goal state. Many states are goals, all of which must app
-; - For some transformations there is no important choice to make, since the transformation is not an approximating transformation.
-; - varying transformations may take varying amounts of resources
-; - they may also result in better or worse approximatiosn
-; - the quality or cost of every state should be some function of the fidelity of the approximatinon
-; - its not clear whehter its meaningful to assign costs to non-goal states
-; - what is a goal state anyway?
-
-
-; Code smell
-; Repeat until / repeat before until need better names
+; Repeat until / repeat before until need better names - now in clozen
 ; I have this lit? code, its not being used, decide what is correct to do there
 ; no-var-node-iterator seems a bit ad hoc, what is the general problem and solution
 ; is this X'ing out of matched patterns the right thing to do?
 ; Do i have the write logic in my pattern matcher
 ; is seq? the right predicate for when to go inside
 ; Can I add types to my rules?
-
-;; TODO
 ; Make this work on the mean and planning example
 ; Devise and code inverse graphics example
 ; Need to differentiate between conditions I Want for debugging and other conditions, e.g. count= for arglist and paramlist should not need to be tested, unless your program is incorrect.
 
-;; Pattern Matching
+(defprotocol PatternMatcher
+  "A pattern matcher must just provide a pat-match function"
+  (pat-match [pattern exp]))
+
 (def fail
   "indicates pat-match failure"
   nil)
@@ -139,16 +52,6 @@
       (= input binding-val) bindings
       
       :else fail)))
-
-;; Types of symbol
-; a a literal x  - If the pattern has a literal, the expression must be equal to that literal.
-; A variable: ?x - a variable in a pattern will match anything in the input, and bind
-; A wildcard: _  - a wildcard with match anything but not bind
-; A vaarg     &x - An option will match zero or many arguments
-;                  there can be only one per list
-
-(f )
-(f [] &body)
 
 (defn lit
   "make a literal"
@@ -189,7 +92,7 @@
   (NodeIterator. exp (zip/zipper #(and (not (variable? %)) (coll? %))
                       seq (fn [_ c] c) exp)))
 
-(defn pat-match
+(defn linear-pat-match
   "Match pattern against input and bind variables to values.
    Iterate through both simultaneously, when I find a variable in pattern,
    bind that to whatever is at the same spot in exp.
@@ -238,50 +141,48 @@
       :else ; literal in both do not match
       fail)))
 
-;; Rule
-(defrecord Rule
-  ^{:doc "A rule is composed of a predicate, its two operands and conditions"}
-  [predicate lhs rhs condition])
+(defrecord LinearPattern
+  ^{:doc "Checks the pattern linear ala Norvig - lisp"}
+  [pattern])
 
-(defn rule
-  "Rule constructor
-   (rule '-> (~(lit 'square) ~(variable 'x)) ~'(* x x) ~'(pos? x)))"
-  [predicate lhs rhs condition]
-  (->Rule predicate lhs rhs condition))
+(defrecord CorePattern
+  ^{:doc "This uses clojure.core.match by Nolan"}
+  [pattern])
 
-(defn pat-rewrite
-  "Determine whether a pattern matches, if so, rewrite accordingly.
-   Else return nil"
-  [exp rule]
-  (if-let [bindings (pat-match (:lhs rule) exp)]
-    (if ((:condition rule) bindings) ;if we match and conditions pass
-        ((:rhs rule) bindings)
-        nil)
-    nil))
+(extend-protocol PatternMatcher
+  LinearPattern
+  (pat-match [pattern exp] (linear-pat-match (:pattern pattern) exp))
+  CorePattern
+  (pat-match [pattern exp] ((:pattern pattern) exp)))
 
-;; Transformers
-(defn apply-first-transform
-  "Do the first transform that is applicable from an ordered set of rules
-   else nil"
-  [exp rules]
-  (clzn/loop-until-fn (partial pat-rewrite exp) rules))
+(defmacro match-fn
+  "Pattern match a row of occurrences. Take a vector of occurrences, vars.
+  Clause question-answer syntax is like `cond`. Questions must be
+  wrapped in a vector, with same arity as vars. Last question can be :else,
+  which expands to a row of wildcards.
+  
+  Example:
+  (let [x 1
+        y 2]
+    (match [x y 3]
+      [1 2 3] :answer1
+      :else :default-answer))"
+  [vars & clauses]
+  (let [[vars clauses]
+        (if (vector? vars)
+            [vars clauses]
+            [(vector vars)
+            (mapcat (fn [[c a]]
+                      [(if (not= c :else) (vector c) c) a])
+              (partition 2 clauses))])]
+     `(fn [~'x] ~(clj-form '[x] clauses))))
 
-(defn eager-transformer
-  "This is an eager transformer.
-   It matches the rules in order and applies first match"
-  [rules exp]
-  ; (println "getting in eager transformer")
-  (loop [iterator (subtree-iterator exp)]
-    (if (end? iterator) ; recurse until no rules matched
-        nil
-        ; try first possible rewrite on this subtree, otherwise move to next
-        (if-let [exp (apply-first-transform (realise iterator) rules)]
-          ; Rewrite part of expression iterator currently pointing to,
-          ; then returh entire root
-          (root (update iterator exp)) 
-          (recur (step iterator))))))
-
-(defn rewrite
-  "Rewrite an expression using a relation"
-  [exp transform]
-  (clzn/repeat-before-until #(debug/dbg (transform %)) exp nil?))
+(comment
+  (def mul-pat1 `(~'* ~(variable 'x) ~(variable 'y)))
+  (def linear-pat (->LinearPattern mul-pat1))
+  (def core-pat (->CorePattern (match-fn x [* a b] {:a a :b b}
+                         :else nil)))
+  (pat-match linear-pat '(* 1 2))
+  (pat-match core-pat '[* 1 2]) 
+  (:pattern core-pat)
+  )
