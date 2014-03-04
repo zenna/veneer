@@ -78,29 +78,6 @@
 ; - A DSL which makes it convenient to write these rewrite rules
 ; We can use macros to define a pure like language for rewriting.
 
-;; TODO
-; Features
-; DSL, need more convenient notation. Some combination of function and macros
-; take spec e.g
-;     f x1 .. xn -> (f x1 .. x2) where (and (function? f)
-;                                           (primitive? f)
-;                                           (evaluated? xi)))
-
-; recognise f is the literal, xns are variables, make rewrite function with variables bound, and condition with variables bound.
-; Encode all evaluation rules as rewrite rules
-;  
-
-; Code smell
-; Repeat until / repeat before until need better names
-; I have this lit? code, its not being used, decide what is correct to do there
-; no-var-node-iterator seems a bit ad hoc, what is the general problem and solution
-; is this X'ing out of matched patterns the right thing to do?
-; Do i have the write logic in my pattern matcher
-; is seq? the right predicate for when to go inside
-; Can I add types to my rules?
-
-; The evaluation of the program is a kind of problem, but what kind?
-
 ; At a high level when we evaluate a program approximately, we have to make choices about which approximatiosn we take.
 ; The choices we make may have consequences in the future, and we may have to revise our choices.
 ; This motivations two perspectives on the kind of problem this is, a) a planning problem b) a graph search problem c) an local optimisation.
@@ -117,11 +94,20 @@
 ; - its not clear whehter its meaningful to assign costs to non-goal states
 ; - what is a goal state anyway?
 
+
+; Code smell
+; Repeat until / repeat before until need better names
+; I have this lit? code, its not being used, decide what is correct to do there
+; no-var-node-iterator seems a bit ad hoc, what is the general problem and solution
+; is this X'ing out of matched patterns the right thing to do?
+; Do i have the write logic in my pattern matcher
+; is seq? the right predicate for when to go inside
+; Can I add types to my rules?
+
 ;; TODO
 ; Make this work on the mean and planning example
 ; Devise and code inverse graphics example
-; Refacator out iterator and graph to clozen or elsewhere - DONE
-; 
+; Need to differentiate between conditions I Want for debugging and other conditions, e.g. count= for arglist and paramlist should not need to be tested, unless your program is incorrect.
 
 ;; Pattern Matching
 (def fail
@@ -136,8 +122,6 @@
   "Find a variable value pair in the binding list"
   [var bindings]
   (bindings var))
-
-; (defn binding-val (binding))
 
 (defn extend-bindings
   "Adds a var binding to binding map"
@@ -155,6 +139,16 @@
       (= input binding-val) bindings
       
       :else fail)))
+
+;; Types of symbol
+; a a literal x  - If the pattern has a literal, the expression must be equal to that literal.
+; A variable: ?x - a variable in a pattern will match anything in the input, and bind
+; A wildcard: _  - a wildcard with match anything but not bind
+; A vaarg     &x - An option will match zero or many arguments
+;                  there can be only one per list
+
+(f )
+(f [] &body)
 
 (defn lit
   "make a literal"
@@ -177,6 +171,17 @@
   [x]
   (and (vector? x)
        (= (first x) 'variable)))
+
+(defn wildcard
+  "make a wild card"
+  [symbol]
+  ['wildcard symbol])
+
+(defn wildcard?
+  "is it a wildcard"
+  [x]
+  (and (vector? x)
+       (= (first x) 'wildcard)))
 
 (defn no-var-node-iterator
   "Node iterator factory"
@@ -280,74 +285,3 @@
   "Rewrite an expression using a relation"
   [exp transform]
   (clzn/repeat-before-until #(debug/dbg (transform %)) exp nil?))
-
-;; Parse DSL - more convenient notation for writing rules
-; We create pure-lang like DSL for more concise rule writing
-(defn split-coll-at
-  "Split vector along 'at'"
-  [coll at]
-  (loop [split-colls [] coll coll]
-    (println "coll is" coll)
-    (let [index (.indexOf coll at)]
-      (if (= index -1)
-          (conj split-colls coll)
-          (recur (conj split-colls (subvec coll 0 index)) 
-                 (subvec coll (inc index)))))))
-
-(def primitives {'+ + '* * '- +})
-
-(defn primitive
-  "Get evaluable function from symbol"
-  [symb]
-  (if-let [f (primitives symb)]
-    f
-    (eval symb)))
-
-(defn primitive?
-  "Is the symbol a primitive?"
-  [symb]
-  (clzn/nil-to-false (primitives symb)))
-
-(defn evaluated?
-  "Is this expression fully evaluated? Check by seeing if any more
-   rewrite rules can be applied"
-  [exp]
-  (number? exp)) ; FIXME this is wrong
-  ; (if (clzn/loop-until-fn #(pat-match (:lhs %) exp) rules)
-  ;   true
-  ;   false))
-
-(comment
-  (def a-rule
-    (rule '->
-          `(~'square ~(variable 'x)) ; lhs
-          (fn [{x (variable 'x)}]           ; rhs
-            `(~'* ~x ~x))
-          (fn [_]           ; condition
-            true)))
-
-  (def mul-rule
-    (rule '->
-          `(~'* ~(variable 'x) ~(variable 'y)) ; lhs
-          (fn [{x (variable 'x) y (variable 'y)}]           ; rhs
-            (* x y))
-          (fn [{x (variable 'x) y (variable 'y)}]           ; condition
-            (and (number? x) (number? y)))))
-
-  ;; The problem here is that I want to tell if there are any more transforms
-  ;; To do, so the condition is dependent on what I have evaluated already
-  (def primitive-apply-rule
-    (rule '->
-          `(~(variable 'f) ~(variable 'x) ~(variable 'y))
-          (fn [{f (variable 'f) x (variable 'x) y (variable 'y)}]
-            ((primitive f) x y))
-          (fn [{f (variable 'f) x (variable 'x) y (variable 'y)}]
-            (and (primitive? f)
-                 (evaluated? x)
-                 (evaluated? y)))))
-
-  (def a-exp '(+ (square (square 3)) 2))
-  (def b-exp '(* 2 9))
-  (def transformer (partial eager-transformer [a-rule primitive-apply-rule]))
-  (rewrite a-exp transformer)
-  (def result (rewrite a-exp transformer)))
