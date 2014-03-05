@@ -44,7 +44,7 @@
   "Determine whether a pattern matches, if so, rewrite accordingly.
    Else return nil"
   [exp rule]
-  (println "lhs is" (:lhs rule) "exp is" exp)
+  ; (println "lhs is" (:lhs rule) "exp is" exp)
   (if-let [bindings (pat-match (:lhs rule) exp)]
     (if ((:condition rule) bindings) ;if we match and conditions pass
         ((:rhs rule) bindings)
@@ -58,19 +58,44 @@
   [exp rules]
   (clzn/loop-until-fn (partial pat-rewrite exp) rules))
 
+; (defn eager-transformer
+;   "This is an eager transformer.
+;    It matches the rules in order and applies first match"
+;   [rules exp]
+;   (loop [iterator (subtree-iterator exp)]
+;     (if (end? iterator) ; recurse until no rules matched
+;         nil
+;         ; try first possible rewrite on this subtree, otherwise move to next
+;         (if-let [exp (apply-first-transform (realise iterator) rules)]
+;           ; Rewrite part of expression iterator currently pointing to,
+;           ; then returh entire root
+;           (root (update iterator exp)) 
+;           (recur (step iterator))))))
+
 (defn eager-transformer
   "This is an eager transformer.
    It matches the rules in order and applies first match"
   [rules exp]
-  (loop [iterator (subtree-iterator exp)]
-    (if (end? iterator) ; recurse until no rules matched
-        nil
-        ; try first possible rewrite on this subtree, otherwise move to next
-        (if-let [exp (apply-first-transform (realise iterator) rules)]
-          ; Rewrite part of expression iterator currently pointing to,
-          ; then returh entire root
-          (root (update iterator exp)) 
-          (recur (step iterator))))))
+  (let [iterator (subtree-iterator exp)
+        apply-rule
+        (fn [rule]
+          (loop [itr iterator]
+            (if (end? itr) nil
+                (if-let [exp (pat-rewrite (realise itr) rule)]
+                  (root (update itr exp))
+                  (recur (step itr))))))]
+  (clzn/loop-until-fn apply-rule rules)))
+
+
+  ; (loop [iterator (subtree-iterator exp)]
+  ;   (if (end? iterator) ; recurse until no rules matched
+  ;       nil
+  ;       ; try first possible rewrite on this subtree, otherwise move to next
+  ;       (if-let [exp (apply-first-transform (realise iterator) rules)]
+  ;         ; Rewrite part of expression iterator currently pointing to,
+  ;         ; then returh entire root
+  ;         (root (update iterator exp)) 
+  ;         (recur (step iterator))))))
 
 (defn rewrite
   "Rewrite an expression using a relation"
