@@ -4,7 +4,6 @@
   (:require [clozen.debug :as debug]
             [clozen.helpers :as clzn]
             [clozen.iterator :refer :all])
-  (:import [clozen.iterator NodeIterator SubtreeIterator])
   (:require [clojure.zip :as zip]))
 
 

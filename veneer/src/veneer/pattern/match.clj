@@ -5,7 +5,7 @@
             [clozen.helpers :as clzn]
             [clozen.iterator :refer :all])
   (:require [clojure.core.match :refer [clj-form match]])
-  (:import [clozen.iterator NodeIterator SubtreeIterator])
+  (:import [clozen.iterator NodeItr])
   (:require [clojure.zip :as zip]))
 
 ; Repeat until / repeat before until need better names - now in clozen
@@ -89,7 +89,7 @@
 (defn no-var-node-iterator
   "Node iterator factory"
   [exp]
-  (NodeIterator. exp (zip/zipper #(and (not (variable? %)) (coll? %))
+  (NodeItr. exp (zip/zipper #(and (not (variable? %)) (coll? %))
                       seq (fn [_ c] c) exp)))
 
 (defn linear-pat-match
