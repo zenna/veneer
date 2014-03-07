@@ -31,15 +31,47 @@
 ; There may be no normal form, instead there may be a variety of normal forms.
 (defrecord Rule
   ^{:doc "A rule is composed of a predicate, its two operands and conditions"}
-  [predicate lhs rhs itr condition])
+  [predicate lhs rhs itr applicable? condition])
+
+; A rule really has a 
+; predicate - defines relationship between its operands, which are patterns, e.g x = y, x approximates y, x can be rewritten to y.
+; A pattern has a dual perspective, it acts as a predicate when when given an object will tell you whether it matches, in this sense it partitions the space of all objects.
+; But it also has a generative component: it partially specifies what it requires to - (+ x _) could generate (+ x 3) or (+ x 10) anything it generates would of course match.
+; The type of a pattern can be thought of as Maybe Map
+; if it doesn't match it returns nil, otherwise it will return variable bindings, which of course could be an empty list.
+; From a pure perspective we can think of a context as a predicate, telling us whether a rule is applicable in;
+; In reality we embed the context a generative or iterative component that allows it to
+; (defrecord NewRule
+;   ^{:doc "A rule is composed of a relation, its two operands a context"}
+;   [rel lhs rhs pre-context post-context])
+
+; (defprotocol Context
+;   (can-apply? [context rule obj]) ; Can this rule be applied in this context
+;   (next [])
+
+; (defn new-rule
+;   "New Rule Constructor"
+;   [rel lhs rhs pre-context post-context]
+;   (->NewRule rel lhs rhs context))
+
+; (defn add-precontext)
+
+; (defn add-postcontext)
+
+; Context - This adds extra information about where a pattern is applicable.
+; - For evaluation of lisp programs, most contexts will be lists, 
+; pattern - acts as a predicate which matches an object and binds variables
+; the transform - 
+; pre-condition, 
+; post-condition.
 
 (defn rule
   "Rule constructor
    (rule '-> (~(lit 'square) ~(variable 'x)) ~'(* x x) ~'(pos? x)))"
-  ([predicate lhs rhs iterator condition]
-    (->Rule predicate lhs rhs iterator condition))
-  ([predicate lhs rhs iterator]
-    (->Rule predicate lhs rhs iterator (fn [& _] true))))
+  ([predicate lhs rhs iterator applicable? condition]
+    (->Rule predicate lhs rhs iterator applicable? condition))
+  ([predicate lhs rhs applicable? iterator]
+    (->Rule predicate lhs rhs applicable? iterator (fn [& _] true))))
 
 (defn pat-rewrite
   "Determine whether a pattern matches, if so, rewrite accordingly.
@@ -52,25 +84,34 @@
         nil)
     nil))
 
-;; Transformers
-(defn apply-first-transform
-  "Do the first transform that is applicable from an ordered set of rules
-   else nil"
-  [exp rules]
-  (clzn/loop-until-fn (partial pat-rewrite exp) rules))
+; (defn apply-rule
+;   "Apply this rule to all the nested expressions and rewrite if match"
+;   [exp rule]
+;   (if (can-apply? rule exp)
+;       (next-context rule exp)
+;       (loop [itr ((.itr rule) exp)]
+;         (if (end? itr) nil
+;             (if-let [exp (pat-rewrite (realise itr) rule)]
+;               (root (update itr exp))
+;               (recur (step itr)))))
+;       nil))
+
+(defn apply-rule
+  "Apply this rule to all the nested expressions and rewrite if match"
+  [exp rule]
+  (if ((.applicable? rule) exp)
+      (loop [itr ((.itr rule) exp)]
+        (if (end? itr) nil
+            (if-let [exp (pat-rewrite (realise itr) rule)]
+              (root (update itr exp))
+              (recur (step itr)))))
+      nil))
 
 (defn eager-transformer
   "This is an eager transformer.
    It matches the rules in order and applies first match"
   [rules exp]
-  (let [apply-rule
-        (fn [rule]
-          (loop [itr ((.itr rule) exp)]
-            (if (end? itr) nil
-                (if-let [exp (pat-rewrite (realise itr) rule)]
-                  (root (update itr exp))
-                  (recur (step itr))))))]
-  (clzn/loop-until-fn apply-rule rules)))
+  (clzn/loop-until-fn (partial apply-rule exp) rules))
 
 (defn rewrite
   "Rewrite an expression using a relation"
