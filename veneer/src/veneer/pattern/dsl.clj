@@ -9,74 +9,83 @@
 
 ;; Parse DSL - more convenient notation for writing rules
 ; We create pure-lang like DSL for more concise rule writing
-(defn split-coll-at
-  "Split vector along 'at'"
-  [coll at]
-  (loop [split-colls [] coll coll]
-    (println "coll is" coll)
-    (let [index (.indexOf coll at)]
-      (if (= index -1)
-          (conj split-colls coll)
-          (recur (conj split-colls (subvec coll 0 index)) 
-                 (subvec coll (inc index)))))))
 
-; (def primitive-apply-rule
-;   "This rule applies a primitive function"
-;   (rule '->
-;         (->CorePattern (match-fn x
-;                          ([f & args] :seq) {:f f :args args}
-;                          :else nil))
-;         (fn [{f :f args :args}]
-;           (apply (primitive f) args))
-;         (->ExprContext
-;           itr/subtree-leaves-first-itr
-;           (fn [{f :f args :args}]
-;             (and (primitive? f)
-;                  (evaluated? args))))
-;         nil))
-
+;; Normal Application Rules
 (defrule primitive-apply-rule
   "Apply primitive functions"
   (-> (f & args) (apply f args) :when (and (primitive? f)
-                                          (evaluated? args))))
-
-; (def compound-f-sub-rule
-;   "Substitute in a compound function"
-;   (rule '->
-;         (->CorePattern (match-fn x
-;                          ([f & args] :seq) {:f f :args args}
-;                          :else nil))
-;         (fn [{f :f args :args}]
-;           `(~(lookup-compound f) ~@args))
-;         (->ExprContext
-;           itr/subtree-itr
-;           (fn [{f :f}]
-;             (compound? f)))
-;         nil))
-
+                                           (evaluated? args))))
 (defrule compound-f-sub-rule
   "Substitute in a compound function"
-  (-> (f & args) `(~(lookup-compound f) ~@args) when (compound? f)))
+  (-> (f & args) `(~(lookup-compound f) ~@args) :when (compound? f)))
 
-; (def variable-sub-rule
-;   "Substitute in variables"
-;   (rule 
-;   '->
-;   (->CorePattern (match-fn x
-;                    ([(['fn [& args] body] :seq) & params] :seq)
-;                      {:args args :body body :params params}
-;                    :else nil))
-;   (fn [{args :args body :body params :params}]
-;     (postwalk-replace (zipmap args params) body))
-;   (->ExprContext
-;     itr/subtree-itr
-;     (fn [_ &]
-;       true))
-;   nil))
+(defrule sub-vars-rule
+  "A variable substitution rule"
+  (-> ((fn [& args] body) & params) (rewrite )
+
+(defrule if-rule
+  "Evaluated if rule"
+  (-> [(if true branch alternative)
+       (if false consequent branch)] branch))
+
+(defrule def-rule
+  "Equivalent to defn macro"
+  (-> (defn name docstring args body) `(def (fn args) body)))
+
+(defrule defn-rule
+  "Equivalent to defn macro"
+  (-> (defn name docstring args body) `(def (fn args) body)))
+
+;; Abstract Operators
+; Random Primitives
+(defrule
+  "Interval abstraction of uniform real"
+  (⊑ (rand) (interval-abo 0 1)))
 
 (defrule
-  "A variable substitution rule"
-  (-> ((fn [& args] body) &params) (postwalk-replace (zipmap args params) body)
+  "Interval abstraction of uniform real"
+  (⊑ (rand-int x y) (interval-abo 0 1)))
+
+(defrule
+  "Symbolic abstraction of gaussian"
+  (-> (bernoulli) (bernoulli 0.5)))
+
+(defrule
+  "Symbolic abstraction of gaussian"
+  (⊑ (bernoulli p) (interval-abo 0 1)))
+
+(defrule
+  "Symbolic abstraction of gaussian"
+  (⊑ (unif-real) (interval-abo 0 1)))
+
+
+;; Conversion between abstract domains
+(defrule
+  "We can cover a convex polyhedra with boxes"
+  (⊑ x (cover %n-boxes x) :where (convex-polytope? x)))
+
+(defrule
+  "We can cover a convex polyhedra with boxes"
+  (⊑ x (cover %n-boxes x) :where (convex-polytope? x)))
+
+;; Primitive Operators on abstract domains
+(defrule +-interval-abo
+  "Add two intervals"
+  (⊑ (+ & args) :let [[int-args others] (separate int-abo? args)]
+     [(apply add-intervals int-args) :when (empty? others)
+      (+ @others (apply add-intervals int-args)) :when (seq? int-args)]))
+
+; Add intervals to real values
+
+; Add convex polyhedra together
+
+
+;; Under approximations
+
+;; Samples
+(defrule
+  "Interval abstraction of uniform real"
+  (~ (rand) (rand)))
 
 (defmacro defrule
   [name docstring rel]
