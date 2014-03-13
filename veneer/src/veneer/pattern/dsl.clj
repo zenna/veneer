@@ -1,120 +1,137 @@
 (ns ^{:doc "Domain specific language for pattern matching"
       :author "Zenna Tavares"}
   veneer.pattern.dsl
+  (:require [veneer.pattern.rule :refer [rule]])
   (:require [clozen.debug :as debug]
-            [clozen.helpers :as clzn]
-            [clozen.iterator :refer :all])
-  (:require [clojure.zip :as zip]))
+            [clozen.helpers :refer [in?]]
+            [clozen.zip :as clzn.zip]
+            [clozen.iterator :as clzn.itr :refer [realise step]])
+  (:require [clojure.zip :as zip]
+            [clojure.walk :refer [postwalk]])
+  (:require [fipp.edn :refer (pprint) :rename {pprint fipp}]))
 
-
-;; Parse DSL - more convenient notation for writing rules
+; Parse DSL - more convenient notation for writing rules
 ; We create pure-lang like DSL for more concise rule writing
+(defn dsl-lhs-expand [f-args x]
+  (cond
+    (list? x) `([~@x] :seq)
+    (and (symbol? x) (not (in? (keys f-args) x))) x
+    :else x))
 
-;; Normal Application Rules
-(defrule primitive-apply-rule
-  "Apply primitive functions"
-  (-> (f & args) (apply f args) :when (and (primitive? f)
-                                           (evaluated? args))))
-(defrule compound-f-sub-rule
-  "Substitute in a compound function"
-  (-> (f & args) `(~(lookup-compound f) ~@args) :when (compound? f)))
+(defn lhs-to-corepattern [lhs f-args]
+  `(~'->CorePattern
+    (~'match-fn ~'x
+      ~(postwalk (partial dsl-lhs-expand f-args) lhs) ~f-args
+      :else nil)))
 
-(defrule sub-vars-rule
-  "A variable substitution rule"
-  (-> ((fn [& args] body) & params) (rewrite )
+(defn forced-var?
+  "is x a variable (a symbol starting with ?"
+  [x]
+  (and (symbol? x) (.startsWith (name x) "?")))
 
-(defrule if-rule
-  "Evaluated if rule"
-  (-> [(if true branch alternative)
-       (if false consequent branch)] branch))
+(defn extract-pattern-vars
+  "Do a recursive walk through a pattern and extract the variables"
+  [term]
+  (loop [itr (clzn.itr/node-itr term) vars []]
+    (debug/dbg (realise itr))
+    (cond
+      (clzn.itr/end? itr) vars
+      (debug/dbg (symbol? (realise itr)))
+      (cond
+        (forced-var? (realise itr))
+        (recur (step itr) (conj vars (realise itr)))
 
-(defrule def-rule
-  "Equivalent to defn macro"
-  (-> (defn name docstring args body) `(def (fn args) body)))
+        (and (not= '& (realise itr)) (debug/dbg (not (zero? (clzn.zip/zip-loc-pos (:zipped-tree itr))))))
+        (recur (step itr) (conj vars (realise itr)))
 
-(defrule defn-rule
-  "Equivalent to defn macro"
-  (-> (defn name docstring args body) `(def (fn args) body)))
+        :else
+        (recur (step itr) vars))
+      :else
+      (recur (step itr) vars))))
 
-;; Abstract Operators
-; Random Primitives
-(defrule
-  "Interval abstraction of uniform real"
-  (⊑ (rand) (interval-abo 0 1)))
-
-(defrule
-  "Interval abstraction of uniform real"
-  (⊑ (rand-int x y) (interval-abo 0 1)))
-
-(defrule
-  "Symbolic abstraction of gaussian"
-  (-> (bernoulli) (bernoulli 0.5)))
-
-(defrule
-  "Symbolic abstraction of gaussian"
-  (⊑ (bernoulli p) (interval-abo 0 1)))
-
-(defrule
-  "Symbolic abstraction of gaussian"
-  (⊑ (unif-real) (interval-abo 0 1)))
-
-
-;; Conversion between abstract domains
-(defrule
-  "We can cover a convex polyhedra with boxes"
-  (⊑ x (cover %n-boxes x) :where (convex-polytope? x)))
-
-(defrule
-  "We can cover a convex polyhedra with boxes"
-  (⊑ x (cover %n-boxes x) :where (convex-polytope? x)))
-
-;; Primitive Operators on abstract domains
-(defrule +-interval-abo
-  "Add two intervals"
-  (⊑ (+ & args) :let [[int-args others] (separate int-abo? args)]
-     [(apply add-intervals int-args) :when (empty? others)
-      (+ @others (apply add-intervals int-args)) :when (seq? int-args)]))
-
-; Add intervals to real values
-
-; Add convex polyhedra together
-
-
-;; Under approximations
-
-;; Samples
-(defrule
-  "Interval abstraction of uniform real"
-  (~ (rand) (rand)))
-
+;; TODO
+;- Suitable context and iterators
+;- Conditionals :when
+;- Fix &
+; - Parameters
+; - Ors
 (defmacro defrule
-  [name docstring rel]
-  ;; I have to convert lhs into appropriate CorePatternFormat
-  ;; I have to extract the parameters
-  (let [])
+  "## Variables 
+   We follow a pure-lang like convention:
+   If there is a symbol in the pattern, we consider it a variable
+   -- if it is not the first of a list Or it is prefixed with ?
+   We consider it a literal if it is:
+   -- The first in the list of quoted
 
-  `(def name docstring
+   ## Context
+   We'll use the node iterator constrained to type of lhs
+   "
+  [name docstring a-rule]
+  {:pre [(list? a-rule)]
+   :post (fipp (macroexpand %))}
+  (let [[rel lhs rhs & whens] a-rule
+        pat-vars (extract-pattern-vars lhs)
+        f-args (zipmap pat-vars (map keyword pat-vars))]
+  `(def ~name ~docstring
+     (~'rule
+      (quote ~rel)
+      ~(lhs-to-corepattern lhs f-args)
+      (~'fn [~f-args] ~rhs)
+      (~'->ExprContext
+        ~(if (coll? lhs)
+             `(~'fn [~'exp]
+               (clzn.itr/add-itr-constraint (clzn.itr/node-itr ~'exp) 
+                                       #(coll? (clzn.itr/realise %))))
+             'itr/node-itr)
+        ~(if whens
+            `(~'fn [~f-args] ~(nth whens 1))
+            '(fn [_ &] true)))
+        nil))))
 
-(defn assignment-rules
-  ""
-  [lhs rhs]
+(comment
+  (def primitive-apply-rule
+    "This rule applies a primitive function"
+    (rule '->
+          (->CorePattern (match-fn x
+                           ([f & args] :seq) {:f f :args args}
+                           :else nil))
+          (fn [{f :f args :args}]
+            (apply (primitive f) args))
+          (->ExprContext
+            itr/subtree-leaves-first-itr)
+            (fn [{f :f args :args}]
+              (and (primitive? f)
+                   (evaluated? args))))
+          nil)
 
-(defn is-symbol?
-  [symbol]
-  (or (vari? symbol) (pos-in-list symbol 0)))
+  (lhs-to-corepattern '((fn [& args] body) & params))
 
-(rule -> (?f &args) (~(lookup-compound f) &args) :when (compound? f))
-(-> (?f &args) (~(lookup-compound f) &args) (compound? f))
-(rule (?f &args) [(~(lookup-compound f) &args) :when ] (compound? f))
+  ;; Normal Application Rules
+  (require '[fipp.edn :refer (pprint) :rename {pprint fipp}])
 
-(defmacro rule-dsl
-  "For our rule syntaax "
-  [& args]
-  (let [[rel lhs rhs condition] args]
-    (postwalk 
+  (defrule primitive-apply-rule
+        "Apply primitive functions"
+        (-> (?f & args) (apply ?f args) :when (and (primitive? f)
+                                                 (evaluated? args))))
 
-(defrule
-  variable-sub
-  -> '((fn [&args] body) &params)
-     (rewrite body (assignment-rules args params))
-     (count= args params)
+  (def expanded
+    (macroexpand
+    '(defrule primitive-apply-rule
+     "Apply primitive functions"
+     (-> (?f & args) (apply ?f args) :when (and (primitive? ?f)
+                                             (evaluated? args))))))
+
+  (fipp expanded)
+
+  (def
+   primitive-apply-rule
+   "Apply primitive functions"
+   (rule
+    rel
+    (->CorePattern
+     (match-fn x ([?f & args] :seq) veneer.pattern.dsl/f-args :else nil))
+    (fn
+     [{args :args, & :&, ?f :?f}]
+     ((apply f args) :when (and (primitive? f) (evaluated? args))))))
+
+)
