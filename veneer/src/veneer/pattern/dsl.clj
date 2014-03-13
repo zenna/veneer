@@ -12,16 +12,16 @@
 
 ; Parse DSL - more convenient notation for writing rules
 ; We create pure-lang like DSL for more concise rule writing
-(defn dsl-lhs-expand [f-args x]
+(defn dsl-lhs-expand [kw-to-vars x]
   (cond
     (list? x) `([~@x] :seq)
-    (and (symbol? x) (not (in? (keys f-args) x))) x
+    (and (symbol? x) (not (in? (vals kw-to-vars) x))) x
     :else x))
 
-(defn lhs-to-corepattern [lhs f-args]
+(defn lhs-to-corepattern [lhs kw-to-vars]
   `(~'->CorePattern
     (~'match-fn ~'x
-      ~(postwalk (partial dsl-lhs-expand f-args) lhs) ~f-args
+      ~(postwalk (partial dsl-lhs-expand kw-to-vars) lhs) ~kw-to-vars
       :else nil)))
 
 (defn forced-var?
@@ -32,22 +32,24 @@
 (defn extract-pattern-vars
   "Do a recursive walk through a pattern and extract the variables"
   [term]
-  (loop [itr (clzn.itr/node-itr term) vars []]
-    (debug/dbg (realise itr))
-    (cond
-      (clzn.itr/end? itr) vars
-      (debug/dbg (symbol? (realise itr)))
+  (if (coll? term)
+      (loop [itr (clzn.itr/node-itr term) vars []]
+      (debug/dbg (realise itr))
       (cond
-        (forced-var? (realise itr))
-        (recur (step itr) (conj vars (realise itr)))
+        (clzn.itr/end? itr) vars
+        (debug/dbg (symbol? (realise itr)))
+        (cond
+          (forced-var? (realise itr))
+          (recur (step itr) (conj vars (realise itr)))
 
-        (and (not= '& (realise itr)) (debug/dbg (not (zero? (clzn.zip/zip-loc-pos (:zipped-tree itr))))))
-        (recur (step itr) (conj vars (realise itr)))
+          (and (not= '& (realise itr)) (debug/dbg (not (zero? (clzn.zip/zip-loc-pos (:zipped-tree itr))))))
+          (recur (step itr) (conj vars (realise itr)))
 
+          :else
+          (recur (step itr) vars))
         :else
-        (recur (step itr) vars))
-      :else
-      (recur (step itr) vars))))
+        (recur (step itr) vars)))
+      [term]))
 
 ;; TODO
 ;- Suitable context and iterators
@@ -71,12 +73,13 @@
    :post (fipp (macroexpand %))}
   (let [[rel lhs rhs & whens] a-rule
         pat-vars (extract-pattern-vars lhs)
-        f-args (zipmap pat-vars (map keyword pat-vars))]
+        kw-to-vars (zipmap (map keyword pat-vars) pat-vars)
+        vars-to-kw (zipmap pat-vars (map keyword pat-vars))]
   `(def ~name ~docstring
      (~'rule
       (quote ~rel)
-      ~(lhs-to-corepattern lhs f-args)
-      (~'fn [~f-args] ~rhs)
+      ~(lhs-to-corepattern lhs kw-to-vars)
+      (~'fn [~vars-to-kw] ~rhs)
       (~'->ExprContext
         ~(if (coll? lhs)
              `(~'fn [~'exp]
@@ -84,7 +87,7 @@
                                        #(coll? (clzn.itr/realise %))))
              'itr/node-itr)
         ~(if whens
-            `(~'fn [~f-args] ~(nth whens 1))
+            `(~'fn [~vars-to-kw] ~(nth whens 1))
             '(fn [_ &] true)))
         nil))))
 
@@ -121,7 +124,13 @@
      (-> (?f & args) (apply ?f args) :when (and (primitive? ?f)
                                              (evaluated? args))))))
 
-  (fipp expanded)
+  (def expanded2
+    (macroexpand
+    '(defrule eval-primitives
+  "Eval primitive functions"
+  (-> x (primitive x) :when (do (println "x is" x) (primitive-symbol? x))))))
+
+  (fipp expanded2)
 
   (def
    primitive-apply-rule
@@ -129,7 +138,7 @@
    (rule
     rel
     (->CorePattern
-     (match-fn x ([?f & args] :seq) veneer.pattern.dsl/f-args :else nil))
+     (match-fn x ([?f & args] :seq) veneer.pattern.dsl/kw-to-vars :else nil))
     (fn
      [{args :args, & :&, ?f :?f}]
      ((apply f args) :when (and (primitive? f) (evaluated? args))))))

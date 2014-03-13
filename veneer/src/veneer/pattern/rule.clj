@@ -72,16 +72,16 @@
   "Apply this rule to all the nested expressions and rewrite if match"
   [exp rule]
   (loop [itr (context-itr (:pre-context rule) exp)]
-    (when (not (end? itr))
-      ; (println "\n Rule" (:name rule) " --- Exp" (realise itr)))
+    ; (when (not (end? itr))
+    ;   (println "\n Rule" (:name rule) " --- Exp" (realise itr)))
     (if (end? itr) nil
         (let [new-exp (pat-rewrite (realise itr) rule)]
           (if (nil? new-exp)
               (recur (step itr))
               (do
                 ; (println "Rule" (:name rule) "\n Matched \t" (realise itr)
-                  ; "\nRewrote to -->\t" new-exp)
-                (root (update itr new-exp)))))))))
+                ;   "\nRewrote to -->\t" new-exp)
+                (root (update itr new-exp))))))))
 
 (defn eager-transformer
   "This is an eager transformer.

@@ -178,11 +178,14 @@
      `(fn [~'x] ~(clj-form '[x] clauses))))
 
 (comment
-  (def mul-pat1 `(~'* ~(variable 'x) ~(variable 'y)))
-  (def linear-pat (->LinearPattern mul-pat1))
-  (def core-pat (->CorePattern (match-fn x [* a b] {:a a :b b}
-                         :else nil)))
-  (pat-match linear-pat '(* 1 2))
-  (pat-match core-pat '[* 1 2]) 
-  (:pattern core-pat)
-  )
+  (do
+    (def mul-pat1 `(~'* ~(variable 'x) ~(variable 'y)))
+    (def linear-pat (->LinearPattern mul-pat1))
+    (def core-pat (->CorePattern (match-fn x [* a b] {:a a :b b}
+                           :else nil)))
+
+    (def new-pat (->CorePattern (match-fn x x {x :x} :else nil)))
+
+    ; (pat-match linear-pat '(* 1 2))
+    (println (pat-match new-pat 'y))
+  ))
