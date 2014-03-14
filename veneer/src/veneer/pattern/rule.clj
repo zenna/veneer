@@ -62,7 +62,7 @@
   ; (println "lhs is" (:lhs rule) "exp is" exp)
   (if-let [bindings (pat-match (:lhs rule) exp)]
     (if (and
-          (pre-context-check (:pre-context rule) bindings)
+          (dbg (pre-context-check (:pre-context rule) bindings))
           (post-context-checks (:post-context rule) bindings))
         ((:rhs rule) bindings)
         nil)
@@ -72,15 +72,15 @@
   "Apply this rule to all the nested expressions and rewrite if match"
   [exp rule]
   (loop [itr (context-itr (:pre-context rule) exp)]
-    ; (when (not (end? itr))
-    ;   (println "\n Rule" (:name rule) " --- Exp" (realise itr)))
+    (when (not (end? itr))
+      (println "\n Rule" (:name rule) " --- Exp" (realise itr)))
     (if (end? itr) nil
         (let [new-exp (pat-rewrite (realise itr) rule)]
           (if (nil? new-exp)
               (recur (step itr))
               (do
-                ; (println "Rule" (:name rule) "\n Matched \t" (realise itr)
-                ;   "\nRewrote to -->\t" new-exp)
+                (println "Rule" (:name rule) "\n Matched \t" (realise itr)
+                  "\nRewrote to -->\t" new-exp)
                 (root (update itr new-exp))))))))
 
 (defn eager-transformer
