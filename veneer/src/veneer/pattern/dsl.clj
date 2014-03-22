@@ -20,7 +20,7 @@
 
 (defn lhs-to-corepattern [lhs kw-to-vars]
   `(~'->CorePattern
-    (~'match-fn ~'x
+    (~'match-fn
       ~(postwalk (partial dsl-lhs-expand kw-to-vars) lhs) ~kw-to-vars
       :else nil)))
 
@@ -29,20 +29,23 @@
   [x]
   (and (symbol? x) (.startsWith (name x) "?")))
 
+(defn special-form? [x]
+  (in? '[& fn let if cond let* def defn] x))
+
 (defn extract-pattern-vars
   "Do a recursive walk through a pattern and extract the variables"
   [term]
   (if (coll? term)
       (loop [itr (clzn.itr/node-itr term) vars []]
-      (debug/dbg (realise itr))
+      (realise itr)
       (cond
         (clzn.itr/end? itr) vars
-        (debug/dbg (symbol? (realise itr)))
+        (symbol? (realise itr))
         (cond
           (forced-var? (realise itr))
           (recur (step itr) (conj vars (realise itr)))
 
-          (and (not= '& (realise itr)) (debug/dbg (not (zero? (clzn.zip/zip-loc-pos (:zipped-tree itr))))))
+          (and (not (special-form? (realise itr))) (not (zero? (clzn.zip/zip-loc-pos (:zipped-tree itr)))))
           (recur (step itr) (conj vars (realise itr)))
 
           :else
@@ -95,7 +98,7 @@
   (def primitive-apply-rule
     "This rule applies a primitive function"
     (rule '->
-          (->CorePattern (match-fn x
+          (->CorePattern (match-fn
                            ([f & args] :seq) {:f f :args args}
                            :else nil))
           (fn [{f :f args :args}]
@@ -138,7 +141,7 @@
    (rule
     rel
     (->CorePattern
-     (match-fn x ([?f & args] :seq) veneer.pattern.dsl/kw-to-vars :else nil))
+     (match-fn ([?f & args] :seq) veneer.pattern.dsl/kw-to-vars :else nil))
     (fn
      [{args :args, & :&, ?f :?f}]
      ((apply f args) :when (and (primitive? f) (evaluated? args))))))

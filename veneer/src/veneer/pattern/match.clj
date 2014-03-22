@@ -167,15 +167,16 @@
     (match [x y 3]
       [1 2 3] :answer1
       :else :default-answer))"
-  [vars & clauses]
-  (let [[vars clauses]
+  [& clauses]
+  (let [vars (gensym "ok")
+        [vars clauses]
         (if (vector? vars)
             [vars clauses]
             [(vector vars)
             (mapcat (fn [[c a]]
                       [(if (not= c :else) (vector c) c) a])
               (partition 2 clauses))])]
-     `(fn [~'x] ~(clj-form '[x] clauses))))
+     `(fn ~vars ~(clj-form vars clauses))))
 
 (comment
   (do
@@ -184,8 +185,10 @@
     (def core-pat (->CorePattern (match-fn x [* a b] {:a a :b b}
                            :else nil)))
 
-    (def new-pat (->CorePattern (match-fn x x {x :x} :else nil)))
+    (def new-pat (->CorePattern (match-fn ([a b c] :seq) {:a a} :else nil)))
 
-    ; (pat-match linear-pat '(* 1 2))
+    (macroexpand '(match-fn ([a b c] :seq) {:a a} :else nil))
+
+    (pat-match new-pat '(* 1 2))
     (println (pat-match new-pat 'y))
   ))
