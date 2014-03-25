@@ -19,6 +19,8 @@
     :else x))
 
 (defn lhs-to-corepattern [lhs kw-to-vars]
+  "Convert dsl pattern to a clojure.core.match type pattern
+   Start at the leaves and replace any convert lists into seq form"
   `(~'->CorePattern
     (~'match-fn
       ~(postwalk (partial dsl-lhs-expand kw-to-vars) lhs) ~kw-to-vars
@@ -37,21 +39,24 @@
   [term]
   (if (coll? term)
       (loop [itr (clzn.itr/node-itr term) vars []]
-      (realise itr)
-      (cond
-        (clzn.itr/end? itr) vars
-        (symbol? (realise itr))
         (cond
-          (forced-var? (realise itr))
-          (recur (step itr) (conj vars (realise itr)))
+          (clzn.itr/end? itr) vars
+          (symbol? (realise itr))   ;If its a symbol and..
+          (cond
+            (forced-var? (realise itr))   ;..if its a forced-var add-to-list
+            (recur (step itr) (conj vars (realise itr)))
 
-          (and (not (special-form? (realise itr))) (not (zero? (clzn.zip/zip-loc-pos (:zipped-tree itr)))))
-          (recur (step itr) (conj vars (realise itr)))
+            ; or its not special and head of the list, add to list
+            (and (not (special-form? (realise itr)))
+                 (not (zero? (clzn.zip/zip-loc-pos (:zipped-tree itr))))
+                 (not= 'quote (first (zip/leftmost (:zipped-tree itr)))))
+            (recur (step itr) (conj vars (realise itr)))
 
+            :else
+            (recur (step itr) vars))
           :else
-          (recur (step itr) vars))
-        :else
-        (recur (step itr) vars)))
+          (recur (step itr) vars)))
+      ; If its just a single term then its the only variable
       [term]))
 
 ;; TODO
@@ -79,22 +84,27 @@
         kw-to-vars (zipmap (map keyword pat-vars) pat-vars)
         vars-to-kw (zipmap pat-vars (map keyword pat-vars))]
   `(def ~name ~docstring
-     (~'rule
-      (quote ~rel)
-      ~(lhs-to-corepattern lhs kw-to-vars)
-      (~'fn [~vars-to-kw] ~rhs)
-      (~'->ExprContext
-        ~(if (coll? lhs)
-             `(~'fn [~'exp]
-               (clzn.itr/add-itr-constraint (clzn.itr/node-itr ~'exp) 
-                                       #(coll? (clzn.itr/realise %))))
-             'itr/node-itr)
-        ~(if whens
-            `(~'fn [~vars-to-kw] ~(nth whens 1))
-            '(fn [_ &] true)))
-        nil))))
+     (with-meta
+       (~'rule
+        (quote ~rel)
+        ~(lhs-to-corepattern lhs kw-to-vars)
+        (~'fn [~vars-to-kw] ~rhs)
+        (~'->ExprContext
+          ~(if (coll? lhs)
+               `(~'fn [~'exp]
+                 (clzn.itr/add-itr-constraint (clzn.itr/node-itr ~'exp) 
+                                         #(coll? (clzn.itr/realise %))))
+               'itr/node-itr)
+          ~(if whens
+              `(~'fn [~vars-to-kw] ~(nth whens 1))
+              '(fn [_ &] true)))
+          nil)
+     {:rule-name (quote ~name)}))))
 
 (comment
+  (require '[veneer.pattern.match :refer :all]
+           '[veneer.pattern.rule :refer :all])
+
   (def primitive-apply-rule
     "This rule applies a primitive function"
     (rule '->
@@ -119,7 +129,8 @@
         "Apply primitive functions"
         (-> (?f & args) (apply ?f args) :when (and (primitive? f)
                                                  (evaluated? args))))
-
+  (defn primitive? [x] true)
+  (def evaluated? primitive?)
   (def expanded
     (macroexpand
     '(defrule primitive-apply-rule

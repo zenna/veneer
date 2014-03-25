@@ -79,6 +79,7 @@
           (if (nil? new-exp)
               (recur (step itr))
               (do
+                (println "\n->" (:rule-name (meta rule)))
                 ; (println "Rule" (:name rule) "\n Matched \t" (realise itr)
                 ;   "\nRewrote to -->\t" new-exp)
                 (root (update itr new-exp))))))))
@@ -89,7 +90,9 @@
   [rules exp]
   (clzn/loop-until-fn (partial apply-rule exp) rules))
 
+(require '[fipp.edn :refer (pprint) :rename {pprint fipp}])
+
 (defn rewrite
   "Rewrite an expression using a relation"
   [exp transform]
-  (clzn/repeat-before-until #(debug/dbg (transform %)) exp nil?))
+  (clzn/repeat-before-until #(let [x (transform %)] (fipp x) x) exp nil?))

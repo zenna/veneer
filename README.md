@@ -1,43 +1,22 @@
 # A not so thin Veneer over C++
-
-# TODO
-- Construct a rewrite system to write clojure into ClangAST
-- Write C++ code to convert this data structure into ClangAST
-- Hack into ClangAST and get it to write it out as sourcecode
-
-Pure is an interesting language based on term rewriting;
-It seems more fully featured than I first anticipated.
-I can't really tell the extent to which it is functional vs functional features are implemented in terms of rewriting.
-The point is that we specify
-- a pattern
-- the variables to be bound if that pattern matches
-- a rewrite.
-
-Pure seems to provide a convenient syntax for doing this.
-
-
-
 Veneer is a programming language which transpiles to C++.
+
+- A language which is translated into C++, similarly to how coffeescript is translated into javascript
+- Has powerful metaprogramming support.  
+- Veneer --- Rewrite --> IR ----> C++
+
+## Intermediate Representation
+The intermediate representation is based on clojure.  It should be similiar enough to clojure to allow me to:
+
+- Compile (pure, non java-importing) Clojure to C++
+- In Clojure, use these IRs as normal functions.
+
+I anticipate the latter of these might be a lot harder than the former.  It would entail a lot of macro magicery, but it is also of less importance.
 
 # Why?
 C++ is a very popular language, many tools and libraries are written in it and many teams require it.
 It has many problems: it has an excess of features which add to real value, and a dearth of features which would substantially improve it.
 Alternatives for other lacking languages have been developed, e.g. Scala over Java, Julia over MATLAB, yet C++ has no replacement.
-
-# What is Veneer
-- A language which is translated into C++, similarly to how coffeescript is translated into javascript
-- Has power metaprogramming support.  In particular there is no syntax to the language.  The syntax defintions are part of the language, there is a standard syntax in the same way languages have a standard library.
-- 
-
-Idea:
-Veneer --- Rewrite --> IR ----> C++
-
-For the IR we will use a version of Clojure.
-Because I know clojure and this part can be worked on separately.
-
-Mechanically the current idea is that, veneer with compile into an intermediate format.
-
-This intermediate format will be compile to C++
 
 # Challenges.
 - (How) can I support a limited subset of C++ and maintain full interopability with existing code
