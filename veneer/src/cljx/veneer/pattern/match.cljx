@@ -1,12 +1,10 @@
 (ns ^{:doc "Do some Pattern matching"
       :author "Zenna Tavares"}
   veneer.pattern.match
-  (:require [clozen.debug :as debug]
-            [clozen.helpers :as clzn]
-            [clozen.iterator :refer :all])
-  (:require [clojure.core.match :refer [clj-form match]])
-  (:import [clozen.iterator NodeItr])
-  (:require [clojure.zip :as zip]))
+  (:require [clozen.helpers :as clzn]
+            [clozen.iterator :refer [update step end? realise]]
+            [clojure.zip :as zip])
+  (:import  [clozen.iterator NodeItr]))
 
 ; Repeat until / repeat before until need better names - now in clozen
 ; I have this lit? code, its not being used, decide what is correct to do there
@@ -48,9 +46,9 @@
     ; (println "Match Variable" var input bindings)
     (cond
       (nil? binding-val) (extend-bindings var input bindings)
-      
+
       (= input binding-val) bindings
-      
+
       :else fail)))
 
 (defn lit
@@ -100,7 +98,7 @@
    For a pattern to match, all its variables must match presumably.
   e.g. Pattern = ([lit square] [variable x])
        Input   = (* x x)
-       What about 
+       What about
        (f x? (y? z)) (f hello d)
   "
   [pattern exp]
@@ -122,11 +120,11 @@
       fail
 
       ;Equal so no binding but continue
-      (= (realise pattern-itr) (realise exp-itr)) 
+      (= (realise pattern-itr) (realise exp-itr))
       (recur (step pattern-itr) (step exp-itr) bindings)
 
       ;; If the matching is successful and the matched item is a list, we can
-      ;; skip over that by 
+      ;; skip over that by
       (variable? (realise pattern-itr))
       (let [new-b (match-variable (realise pattern-itr)
                                   (realise exp-itr) bindings)]
@@ -154,41 +152,3 @@
   (pat-match [pattern exp] (linear-pat-match (:pattern pattern) exp))
   CorePattern
   (pat-match [pattern exp] ((:pattern pattern) exp)))
-
-(defmacro match-fn
-  "Pattern match a row of occurrences. Take a vector of occurrences, vars.
-  Clause question-answer syntax is like `cond`. Questions must be
-  wrapped in a vector, with same arity as vars. Last question can be :else,
-  which expands to a row of wildcards.
-  
-  Example:
-  (let [x 1
-        y 2]
-    (match [x y 3]
-      [1 2 3] :answer1
-      :else :default-answer))"
-  [& clauses]
-  (let [vars (gensym "ok")
-        [vars clauses]
-        (if (vector? vars)
-            [vars clauses]
-            [(vector vars)
-            (mapcat (fn [[c a]]
-                      [(if (not= c :else) (vector c) c) a])
-              (partition 2 clauses))])]
-     `(fn ~vars ~(clj-form vars clauses))))
-
-(comment
-  (do
-    (def mul-pat1 `(~'* ~(variable 'x) ~(variable 'y)))
-    (def linear-pat (->LinearPattern mul-pat1))
-    (def core-pat (->CorePattern (match-fn x [* a b] {:a a :b b}
-                           :else nil)))
-
-    (def new-pat (->CorePattern (match-fn ([a b c] :seq) {:a a} :else nil)))
-
-    (macroexpand '(match-fn ([a b c] :seq) {:a a} :else nil))
-
-    (pat-match new-pat '(* 1 2))
-    (println (pat-match new-pat 'y))
-  ))

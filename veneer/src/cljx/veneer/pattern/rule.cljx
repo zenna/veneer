@@ -3,8 +3,8 @@
   veneer.pattern.rule
   (:require [clozen.debug :as debug]
             [clozen.helpers :as clzn]
-            [clozen.iterator :refer :all])
-  (:require [veneer.pattern.match :refer :all]))
+            [clozen.iterator :refer [update root end? realise step]]
+            [veneer.pattern.match :refer [pat-match]]))
 
 (defrecord Rule
   ^{:doc " lhs - left pattern
@@ -53,8 +53,6 @@
   [& _]
   true)
 
-(use 'clozen.debug)
-
 (defn pat-rewrite
   "Determine whether a pattern matches, if so, rewrite accordingly.
    Else return nil"
@@ -67,32 +65,3 @@
         ((:rhs rule) bindings)
         nil)
     nil))
-
-(defn apply-rule
-  "Apply this rule to all the nested expressions and rewrite if match"
-  [exp rule]
-  (loop [itr (context-itr (:pre-context rule) exp)]
-    ; (when (not (end? itr))
-    ;   (println "\n Rule" (:name rule) " --- Exp" (realise itr)))
-    (if (end? itr) nil
-        (let [new-exp (pat-rewrite (realise itr) rule)]
-          (if (nil? new-exp)
-              (recur (step itr))
-              (do
-                (println "\n->" (:rule-name (meta rule)))
-                ; (println "Rule" (:name rule) "\n Matched \t" (realise itr)
-                ;   "\nRewrote to -->\t" new-exp)
-                (root (update itr new-exp))))))))
-
-(defn eager-transformer
-  "This is an eager transformer.
-   It matches the rules in order and applies first match"
-  [rules exp]
-  (clzn/loop-until-fn (partial apply-rule exp) rules))
-
-(require '[fipp.edn :refer (pprint) :rename {pprint fipp}])
-
-(defn rewrite
-  "Rewrite an expression using a relation"
-  [exp transform]
-  (clzn/repeat-before-until #(let [x (transform %)] (fipp x) x) exp nil?))
