@@ -21,6 +21,9 @@
   "A pattern matcher must just provide a pat-match function"
   (pat-match [pattern exp]))
 
+;; ======================
+;; Linear Pattern Matcher
+
 (def fail
   "indicates pat-match failure"
   nil)
@@ -142,6 +145,9 @@
 (defrecord LinearPattern
   ^{:doc "Checks the pattern linear ala Norvig - lisp"}
   [pattern])
+
+;; ================================
+;; Pattern matcher using core.match
 
 (defrecord CorePattern
   ^{:doc "This uses clojure.core.match by Nolan"}

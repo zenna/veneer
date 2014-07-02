@@ -1,7 +1,7 @@
 (ns ^{:doc "Domain specific language for pattern matching"
       :author "Zenna Tavares"}
   veneer.pattern.dsl
-  (:require [veneer.pattern.rule :refer [rule]]
+  (:require [veneer.pattern.rule :refer [->Rule]]
             [veneer.pattern.match :refer [->CorePattern]]
             [veneer.pattern.match-macros :refer [match-fn]]
             #+clj [veneer.pattern.match-macros :refer [match-fn]]
@@ -39,7 +39,7 @@
   (in? '[& fn let if cond let* def defn] x))
 
 (defn extract-pattern-vars
-  "Do a recursive walk through a pattern and extract the variables"
+  "Do a recursive walk through a term and extract the variables"
   [term]
   (if (coll? term)
       (loop [itr (clzn.itr/node-itr term) vars []]
@@ -73,7 +73,7 @@
 
   (def primitive-apply-rule
     "This rule applies a primitive function"
-    (rule '->
+    (->Rule '->
           (->CorePattern (match-fn
                            ([f & args] :seq) {:f f :args args}
                            :else nil))

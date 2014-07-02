@@ -14,16 +14,25 @@
            post-context - context on rhs"}
   [rel lhs rhs pre-context post-context])
 
-;; Contexts
-; Some contexts may be iterable, some may return a vector in parallel of substructures - what do they all have in common, some type presumably.
+;; =================
+;; Contexts Protocol
+
 (defprotocol Context
+  ^{:doc
+    "Contexts provide an interface for traversing over sub-structures of an object
+     A pattern may be applicable to a complex object on several levels
+     E.g. a pattern (?a ?b) matched against ((1 1)(2 2))
+     could match ?a = 1, ?b = 1 or ?a = (1 1) ?b = (2 2), etc"}
   (context-itr [context obj]))
 
 (defprotocol BoundVarContext
+  ^{:doc "Context on bound-variables - no longer sur eof hte point of this"}
   (matches? [context obj]))
 
 ;; A type for s-expressions
-(defrecord ExprContext [term-itr bound-vars-ok?])
+(defrecord ExprContext
+  ^{:doc "A context for s-expressions which returns an iterator over all terms"}
+  [term-itr bound-vars-ok?])
 
 (extend-type ExprContext Context
   (context-itr [context obj]
@@ -32,11 +41,6 @@
 (extend-type ExprContext BoundVarContext
   (matches? [context bindings]
     ((.bound-vars-ok? context) bindings)))
-
-(defn rule
-  "Rule constructor"
-  [predicate lhs rhs pre-context post-context]
-  (->Rule predicate lhs rhs pre-context post-context))
 
 (defmulti pre-context-check
   (fn [pre-context bindings] (satisfies? BoundVarContext pre-context)))
